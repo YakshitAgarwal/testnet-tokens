@@ -1,0 +1,17 @@
+{
+  "name": "testnet-tokens",
+  "version": "1.0.0",
+  "description": "Get free testnet tokens without leaving the terminal",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "testnet",
+    "tokens",
+    "faucet"
+  ],
+  "author": "Yakshit Agrawal",
+  "license": "MIT",
+  "type": "commonjs"
+}
