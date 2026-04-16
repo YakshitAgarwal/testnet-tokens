@@ -1,14 +1,4 @@
-const ethers = require("ethers");
-const dotenv = require("dotenv");
-
-dotenv.config();
-
-const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
-const wallet = new ethers.Wallet(process.env.PRIVATE_KEY, provider);
-
-const contractAddress = process.env.CONTRACT_ADDRESS;
-
-const abi = [
+[
   {
     inputs: [
       {
@@ -310,23 +300,3 @@ const abi = [
     type: "function",
   },
 ];
-
-const contract = new ethers.Contract(contractAddress, abi, wallet);
-
-async function claimTokens(userAddress) {
-  try {
-    const txCount = await provider.getTransactionCount(userAddress);
-    if (txCount === 0 || !userAddress) {
-      throw new Error("Error");
-    } else {
-      const tx = await contract.claimTokens(userAddress);
-      console.log("Transaction hash:", tx.hash);
-      await tx.wait();
-      console.log("Tokens claimed successfully!");
-    }
-  } catch (error) {
-    console.error("Error claiming tokens:", error);
-  }
-}
-
-module.exports = claimTokens;

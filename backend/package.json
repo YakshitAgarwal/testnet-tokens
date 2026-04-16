@@ -13,5 +13,9 @@
   ],
   "author": "Yakshit Agrawal",
   "license": "MIT",
-  "type": "commonjs"
+  "type": "commonjs",
+  "dependencies": {
+    "dotenv": "^17.4.1",
+    "ethers": "^6.16.0"
+  }
 }
