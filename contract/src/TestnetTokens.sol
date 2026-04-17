@@ -1,316 +1,109 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-/*//////////////////////////////////////////////////////////////
-                            ERRORS
-//////////////////////////////////////////////////////////////*/
-
-error NotOwner();
-error NotOperator();
-error Paused();
-error Blacklisted();
-error InvalidAddress();
-error TransferFailed();
-error CooldownActive();
-error InsufficientBalance();
-error AboveMaxPayout();
-error BelowMinPayout();
-error AlreadyOperator();
-error NotAnOperator();
-error LastOperator();
-error AlreadyBlacklisted();
-error NotBlacklisted();
-
-/*//////////////////////////////////////////////////////////////
-                        CONTRACT
-//////////////////////////////////////////////////////////////*/
-
-contract TestnetTokens {
-
-    /*//////////////////////////////////////////////////////////////
-                        STATE VARIABLES
-    //////////////////////////////////////////////////////////////*/
-
+contract TestnetTokens{
     address public owner;
     bool public paused;
 
-    uint256 public operatorCount;
-    uint256 public maxAllowedPayout = 0.5 ether;
-    uint256 public minAllowedPayout = 0.01 ether;
     uint256 public cooldownPeriod = 1 days;
     uint256 public refillThreshold = 1 ether;
 
     mapping(address => uint256) public lastRequestTime;
-    mapping(address => bool) public operators;
-    mapping(address => bool) public blacklistedAddresses;
-
-    /*//////////////////////////////////////////////////////////////
-                            EVENTS
-    //////////////////////////////////////////////////////////////*/
-
-    event DepositReceived(address indexed from, uint256 amount);
-    event TokenTransfer(address indexed to, uint256 amount);
-    event OperatorAdded(address indexed addr);
-    event OperatorRemoved(address indexed addr);
-    event AddressBlacklisted(address indexed addr);
-    event AddressWhitelisted(address indexed addr);
-    event CooldownPeriodChanged(uint256 newCooldown);
-    event MaxAllowedPayoutChanged(uint256 newMax);
-    event MinAllowedPayoutChanged(uint256 newMin);
-    event OwnershipTransferred(address indexed oldOwner, address indexed newOwner);
-    event FundsWithdrawn(address indexed to, uint256 amount);
-    event FaucetPaused();
-    event FaucetResumed();
-    event RefillRequested(uint256 balance);
-    event RefillThresholdChanged(uint256 threshold);
-
-    /*//////////////////////////////////////////////////////////////
-                            MODIFIERS
-    //////////////////////////////////////////////////////////////*/
-
-    modifier onlyOwner() {
-        if (msg.sender != owner) revert NotOwner();
-        _;
-    }
-
-    modifier onlyOperator() {
-        if (!operators[msg.sender]) revert NotOperator();
-        _;
-    }
-
-    modifier whenNotPaused() {
-        if (paused) revert Paused();
-        _;
-    }
-
-    /*//////////////////////////////////////////////////////////////
-                            CONSTRUCTOR
-    //////////////////////////////////////////////////////////////*/
+    mapping(address => uint256) public requestCount;
+    mapping(address => bool) public blacklistAddresses;
 
     constructor() {
         owner = msg.sender;
-        operators[msg.sender] = true;
-        operatorCount = 1;
     }
 
-    /*//////////////////////////////////////////////////////////////
-                        RECEIVE FUNCTION
-    //////////////////////////////////////////////////////////////*/
-
-    receive() external payable {
-        emit DepositReceived(msg.sender, msg.value);
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only the owner can call this function");
+        _;
     }
 
-    /*//////////////////////////////////////////////////////////////
-                        FAUCET FUNCTIONS
-    //////////////////////////////////////////////////////////////*/
+    receive() external payable {}
 
-    function transferToken(address to, uint256 amount)
-        external
-        onlyOperator
-        whenNotPaused
-    {
-        if (blacklistedAddresses[to]) revert Blacklisted();
-        if (to == address(0) || to == address(this) || to == owner)
-            revert InvalidAddress();
+    function claimTokens(address _to) external onlyOwner {
+        require(!paused, "Contract is paused");
+        require(_to != address(0), "Invalid address");
+        require(_to != owner, "Owner cannot claim tokens");
+        require(_to != address(this), "Contract cannot claim tokens");
+        require(!blacklistAddresses[_to], "Address is blacklisted");
+        uint256 currentTime = block.timestamp;
+        require(currentTime - lastRequestTime[_to] >= cooldownPeriod, "Cooldown period not over");
 
-        if (amount > maxAllowedPayout) revert AboveMaxPayout();
-        if (amount < minAllowedPayout) revert BelowMinPayout();
+        lastRequestTime[_to] = currentTime;
+        requestCount[_to]++;
 
-        uint256 lastRequest = lastRequestTime[to];
-
-        if (block.timestamp < lastRequest + cooldownPeriod)
-            revert CooldownActive();
-
-        if (address(this).balance < amount)
-            revert InsufficientBalance();
-
-        lastRequestTime[to] = block.timestamp;
-
-        (bool success,) = to.call{value: amount}("");
-        if (!success) revert TransferFailed();
-
-        emit TokenTransfer(to, amount);
+        (bool success, ) = _to.call{value: 0.01 ether}("");
+        require(success, "Failed to send tokens");
     }
 
-    /*//////////////////////////////////////////////////////////////
-                        VIEW FUNCTIONS
-    //////////////////////////////////////////////////////////////*/
+    function pause() external onlyOwner {
+        paused = true;
+    }
 
-    function viewBalance()
-        external
-        view
-        onlyOperator
-        returns (uint256)
-    {
+    function unpause() external onlyOwner {
+        paused = false;
+    }
+
+    function changeCooldownPeriod(uint256 _cooldownPeriod) external onlyOwner {
+        cooldownPeriod = _cooldownPeriod;
+    }
+
+    function changeRefillThreshold(uint256 _refillThreshold) external onlyOwner {
+        refillThreshold = _refillThreshold;
+    }
+
+    function changeOwner(address _newOwner) external onlyOwner {
+        require(_newOwner != address(0), "Invalid address");
+        require(_newOwner != owner, "New owner must be different");
+        require(_newOwner != address(this), "Contract cannot be owner");
+        require(!blacklistAddresses[_newOwner], "New owner cannot be blacklisted");
+        owner = _newOwner;
+    }
+
+    function withdrawAll() external onlyOwner {
+        uint256 balance = address(this).balance;
+
+        (bool success, ) = owner.call{value: balance}("");
+        require(success, "Withdraw failed");
+    }
+
+    function withdrawSome(uint256 _amount) external onlyOwner {
+        require(_amount <= address(this).balance, "Insufficient balance");
+
+        (bool success, ) = owner.call{value: _amount}("");
+        require(success, "Withdraw failed");
+    }
+
+    function viewBalance() external view onlyOwner returns (uint256) {
         return address(this).balance;
     }
 
-    /*//////////////////////////////////////////////////////////////
-                        ADMIN CONTROL
-    //////////////////////////////////////////////////////////////*/
-
-    function pauseFaucet() external onlyOwner {
-        paused = true;
-        emit FaucetPaused();
+    function addToBlacklist(address _address) external onlyOwner {
+        require(_address != address(0), "Invalid address");
+        require(_address != owner, "Owner cannot be blacklisted");
+        require(_address != address(this), "Contract cannot be blacklisted");
+        blacklistAddresses[_address] = true;
     }
 
-    function resumeFaucet() external onlyOwner {
-        paused = false;
-        emit FaucetResumed();
+    function removeFromBlacklist(address _address) external onlyOwner {
+        require(_address != address(0), "Invalid address");
+        require(_address != owner, "Owner cannot be removed from blacklist");
+        require(_address != address(this), "Contract cannot be removed from blacklist");
+        blacklistAddresses[_address] = false;
     }
 
-    function changeMaxAllowedPayout(uint256 newMax)
-        external
-        onlyOwner
-    {
-        maxAllowedPayout = newMax;
-        emit MaxAllowedPayoutChanged(newMax);
+    function isBlacklisted(address _address) external view returns (bool) {
+        return blacklistAddresses[_address];
     }
 
-    function changeMinAllowedPayout(uint256 newMin)
-        external
-        onlyOwner
-    {
-        minAllowedPayout = newMin;
-        emit MinAllowedPayoutChanged(newMin);
+    function getRequestCount(address _address) external view returns (uint256) {
+        return requestCount[_address];
     }
 
-    function changeCooldownPeriod(uint256 newCooldown)
-        external
-        onlyOwner
-    {
-        cooldownPeriod = newCooldown;
-        emit CooldownPeriodChanged(newCooldown);
-    }
-
-    function changeRefillThreshold(uint256 threshold)
-        external
-        onlyOwner
-    {
-        refillThreshold = threshold;
-        emit RefillThresholdChanged(threshold);
-    }
-
-    /*//////////////////////////////////////////////////////////////
-                        OPERATOR MANAGEMENT
-    //////////////////////////////////////////////////////////////*/
-
-    function addOperator(address operator)
-        external
-        onlyOwner
-    {
-        if (operator == address(0)) revert InvalidAddress();
-        if (operators[operator]) revert AlreadyOperator();
-
-        operators[operator] = true;
-        operatorCount++;
-
-        emit OperatorAdded(operator);
-    }
-
-    function removeOperator(address operator)
-        external
-        onlyOwner
-    {
-        if (!operators[operator]) revert NotAnOperator();
-        if (operatorCount == 1) revert LastOperator();
-
-        operators[operator] = false;
-        operatorCount--;
-
-        emit OperatorRemoved(operator);
-    }
-
-    /*//////////////////////////////////////////////////////////////
-                        BLACKLIST MANAGEMENT
-    //////////////////////////////////////////////////////////////*/
-
-    function blacklistAddress(address addr)
-        external
-        onlyOperator
-    {
-        if (addr == owner || operators[addr])
-            revert InvalidAddress();
-
-        if (blacklistedAddresses[addr])
-            revert AlreadyBlacklisted();
-
-        blacklistedAddresses[addr] = true;
-
-        emit AddressBlacklisted(addr);
-    }
-
-    function whitelistAddress(address addr)
-        external
-        onlyOperator
-    {
-        if (!blacklistedAddresses[addr])
-            revert NotBlacklisted();
-
-        blacklistedAddresses[addr] = false;
-
-        emit AddressWhitelisted(addr);
-    }
-
-    /*//////////////////////////////////////////////////////////////
-                        TREASURY FUNCTIONS
-    //////////////////////////////////////////////////////////////*/
-
-    function withdrawAll()
-        external
-        onlyOwner
-    {
-        uint256 balance = address(this).balance;
-
-        (bool success,) = owner.call{value: balance}("");
-        if (!success) revert TransferFailed();
-
-        emit FundsWithdrawn(owner, balance);
-    }
-
-    function withdrawSome(uint256 amount)
-        external
-        onlyOwner
-    {
-        if (amount > address(this).balance)
-            revert InsufficientBalance();
-
-        (bool success,) = owner.call{value: amount}("");
-        if (!success) revert TransferFailed();
-
-        emit FundsWithdrawn(owner, amount);
-    }
-
-    /*//////////////////////////////////////////////////////////////
-                        OWNERSHIP MANAGEMENT
-    //////////////////////////////////////////////////////////////*/
-
-    function transferOwnership(address newOwner)
-        external
-        onlyOwner
-    {
-        if (newOwner == address(0))
-            revert InvalidAddress();
-
-        if (blacklistedAddresses[newOwner])
-            revert Blacklisted();
-
-        address oldOwner = owner;
-        owner = newOwner;
-
-        emit OwnershipTransferred(oldOwner, newOwner);
-    }
-
-    /*//////////////////////////////////////////////////////////////
-                        REFILL SIGNAL
-    //////////////////////////////////////////////////////////////*/
-
-    function refillFaucet()
-        external
-        onlyOperator
-    {
-        if (address(this).balance <= refillThreshold)
-            emit RefillRequested(address(this).balance);
+    function getLastRequestTime(address _address) external view returns (uint256) {
+        return lastRequestTime[_address];
     }
 }
